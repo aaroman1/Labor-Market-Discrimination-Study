@@ -1,0 +1,141 @@
+---
+title: 'Labor Market Discrimination Study'
+output:
+  pdf_document: default
+---
+
+### Are "Emily" and "Greg" More Employable Than "Lakisha" and "Jamal"? ###
+
+Bertrand, M., & Mullainathan, S. (2004). Are Emily and Greg more employable than Lakisha and Jamal? A field experiment on labor market discrimination. _American Economic Review, 94_(4), pp. 991-1013.
+ 
+\[Abstract\]
+We perform a field experiment to measure racial discrimination in the labor market. We respond with fictitious resumes to help-wanted ads in Boston and Chicago newspapers. To manipulate perception of race, each resume is randomly assigned either a very African American sounding name or a very White sounding name. The results show significant discrimination against African-American names: White names receive 50 percent more callbacks for interviews. We also find that race affects the benefits of a better resume. For White names, a higher quality resume elicits 30 percent more callbacks whereas for African Americans, it elicits a far smaller increase. Applicants living in better neighborhoods receive more callbacks but, interestingly, this effect does not differ by race. The amount of discrimination is uniform across occupations and industries. Federal contractors and employers who list “Equal Opportunity Employer” in their ad discriminate as much as other employers. We find little evidence that our results are driven by employers inferring something other than race, such as social class, from the names. These results suggest that racial discrimination is still a prominent feature of the labor market.    
+
+
+Variables     | Descriptions
+-----------   | -----------------------------------------------------
+_call_        | Was the applicant called back? (1 = yes; 0 = no)
+_ethnicity_   | indicating ethnicity ("Caucasian-sounding" vs. "African-American sounding" first name)
+_sex_         | indicating sex
+_quality_     | Indicating quality of resume.
+_experience_  | Number of years of work experience on the resume
+_equal_       | Is the employer EOE (equal opportunity employment)?
+
+
+```{r}
+library(tidyverse)
+library(Stat2Data)
+library(car)
+
+resumenames455 <- read.csv("https://raw.githubusercontent.com/JA-McLean/STOR455/master/data/ResumeNames455.csv")
+resumenames455
+```
+
+Constructing a logistic model to predict if the job applicant was called back using _experience_ as the predictor variable.
+
+```{r}
+mod1 <- glm(call ~ experience, data = resumenames455, family = binomial)
+summary(mod1)
+```
+
+
+Plotting the raw data and the logistic curve on the same axes.
+
+```{r}
+plot(call ~ experience, data = resumenames455)
+B0 <- summary(mod1)$coef[1]
+B1 <- summary(mod1)$coef[2]
+plot(jitter(call, amount = 0.1) ~ experience, data = resumenames455)
+curve(exp(B0+B1*x)/(1+exp(B0+B1*x)),add=TRUE, col = "red")
+```
+
+Predicting the probability of an applicant with 5 years of experience getting a callback.
+
+```{r}
+applicant <- data.frame(experience = 5)
+pred1 <- predict(mod1, applicant, "response")
+pred1
+```
+
+Constructing an empirical logit plot.
+
+```{r}
+k <- 10
+x <- resumenames455$experience
+br <- seq(min(x, na.rm=TRUE), max(x, na.rm=TRUE), length.out = k + 1)
+bins <- cut(x, breaks = br, include.lowest = TRUE)
+
+
+y  <- tapply(resumenames455$call,       bins, sum)
+n  <- tapply(resumenames455$call,       bins, length)
+xm <- tapply(resumenames455$experience, bins, mean)
+elogit <- log((y + 0.5) / (n - y + 0.5))
+
+plot(xm, elogit, xlab="Experience (years)", ylab="Empirical logit")
+abline(lm(elogit ~ xm), lwd=2)
+
+
+```
+Looks roughly linear. The empirical logits increase with experience and the points line up around a straight line, with only a mild dip in the mid range. I would say a simple logistic model with a linear term in experience is reasonable here; no clear systematic curvature.
+
+Performing a hypothesis test to determine if there is significant evidence of a relationship between _call_ and _experience_.
+
+```{r}
+summary(mod1)
+
+```
+The null hypothesis is H0 = 0, which means there is no correlation between experience and a call back. The alternative hypothesis is Ha is NOT 0. Since the p value is extremely small, we have conclusive evidence to reject the null. Therefore, there is a correlation between experience and a call back.
+
+Constructing a confidence interval for the odds ratio for your model.
+
+```{r}
+or_hat <- exp(coef(mod1)["experience"])
+ci_or  <- exp(confint.default(mod1)["experience", ])
+c(OR = or_hat, `2.5 %` = ci_or[1], `97.5 %` = ci_or[2])
+
+```
+A 95% confidence interval for the odds ratio per one year increase in experience is 1.02 to 1.06, meaning each extra year is associated with about a 2% to 6% increase in the odds of receiving a callback, and because the whole interval is above 1 this indicates a positive relationship.
+
+For each 5-year increase in _experience_, predicting how the odds will change in the applicant getting a call back.
+
+```{r}
+OR5 <- exp(coef(mod1)["experience"] * 5)
+CI5 <- exp(confint.default(mod1)["experience", ] * 5)
+c(OR5 = OR5, `2.5 %` = CI5[1], `97.5 %` = CI5[2])
+
+```
+Every additional 5 years of experience is associated with about a 22% increase in the odds of getting a callback. The range being between about 11% and 33%.
+
+Constructing subsets of the data for each category of _ethnicity_ and construct logistic models to predict if the job applicant was called back using _experience_ as the predictor variable for each of these subsets. Then plotting the raw data and the logistic curves on the same axes.
+
+```{r}
+library(ggplot2)
+eth_sets <- split(resumenames455, resumenames455$ethnicity)
+mods <- lapply(eth_sets, function(df)
+  glm(call ~ experience, data = df, family = binomial))
+
+ggplot(resumenames455, aes(experience, call, color = ethnicity)) +
+  geom_jitter(height = 0.05, width = 0, alpha = 0.5) +
+  stat_smooth(method = "glm",
+              method.args = list(family = binomial),
+              se = FALSE, formula = y ~ x) +
+  labs(x = "Experience (years)", y = "Pr(call = 1)", color = "Ethnicity")
+```
+
+Both curves slope upward, so more experience raises the callback probability for both groups. Across most of the observed range, the cauc curve sits above the afam curve, meaning at the same experience level the model predicts higher odds of a callback for caucasian-named applicants. The afam curve is a bit steeper, so the gap narrows as experience grows; the apparent crossing at very high experience should be treated cautiously because there are few data there (wide uncertainty). In short: higher experience helps everyone, but the model suggests a baseline advantage for cauc over afam and a possible ethnicity-by-experience interaction.
+
+Constructing subsets of the data for each category of _sex_ and logistic models to predict if the job applicant was called back using _experience_ as the predictor variable for each of these subsets. Then plotting the raw data and the logistic curves on the same axes.
+
+```{r}
+sex_sets <- split(resumenames455, resumenames455$sex)
+mods_sex <- lapply(sex_sets, function(df)
+  glm(call ~ experience, data = df, family = binomial))
+ggplot(resumenames455, aes(experience, call, color = sex)) +
+  geom_jitter(height = 0.05, width = 0, alpha = 0.5) +
+  stat_smooth(method = "glm",
+              method.args = list(family = binomial),
+              se = FALSE, formula = y ~ x) +
+  labs(x = "Experience (years)", y = "Pr(call = 1)", color = "Sex")
+```
+
+Both curves increase with experience, but female rises much more steeply while male is nearly flat. That means the model predicts little change in callback probability with added experience for males, but a noticeable increase for females; at higher experience levels, females are predicted to have higher callback probabilities than males. The gap is small at low experience and widens as experience grows, suggesting a possible sex × experience interaction. Caveat: the far-right tail has few observations, so the large female rise there should be treated cautiously.
